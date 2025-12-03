@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with PostGIS
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: climarisk_postgres
+    environment:
+      POSTGRES_DB: climarisk_db
+      POSTGRES_USER: climarisk
+      POSTGRES_PASSWORD: password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U climarisk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - climarisk_network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: climarisk_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - climarisk_network
+
+  # MinIO for object storage
+  minio:
+    image: minio/minio:latest
+    container_name: climarisk_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - climarisk_network
+
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: climarisk_api
+    environment:
+      DATABASE_URL: postgresql://climarisk:password@postgres:5432/climarisk_db
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - climarisk_network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker for async tasks
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: climarisk_celery
+    environment:
+      DATABASE_URL: postgresql://climarisk:password@postgres:5432/climarisk_db
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - climarisk_network
+    command: celery -A app.core.celery_app worker --loglevel=info
+
+  # Celery Beat for scheduled tasks
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: climarisk_celery_beat
+    environment:
+      DATABASE_URL: postgresql://climarisk:password@postgres:5432/climarisk_db
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - climarisk_network
+    command: celery -A app.core.celery_app beat --loglevel=info
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: climarisk_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - api
+    networks:
+      - climarisk_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  climarisk_network:
+    driver: bridge
+
