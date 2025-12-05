@@ -418,21 +418,5 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
 
-- India Meteorological Department (IMD)
-- NASA for satellite data
-- ESA for climate datasets
-- OpenStreetMap contributors
-- All open-source contributors
-
-## 📞 Contact
-
-- **Project Lead**: [Your Name]
-- **Email**: [your.email@example.com]
-- **GitHub**: [@yourusername](https://github.com/yourusername)
-
----
-
-**Built with ❤️ for a climate-resilient future**
 
